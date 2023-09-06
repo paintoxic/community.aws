@@ -35,6 +35,12 @@ options:
       required: false
       default:
       type: str
+    validate_invalidation_change:
+      description:
+        - A boolean that determines whether to validate if the cache invalidation being created is a new invalidation or one that was previously created
+      required: false
+      default: true
+      type: bool
     target_paths:
       description:
         - A list of paths on the distribution to invalidate. Each path should begin with C(/). Wildcards are allowed. eg. C(/foo/bar/*)
@@ -155,8 +161,10 @@ class CloudFrontInvalidationServiceManager(object):
         self.client = module.client("cloudfront")
         self.__cloudfront_facts_mgr = cloudfront_facts_mgr
 
-    def create_invalidation(self, distribution_id, invalidation_batch):
-        current_invalidation_response = self.get_invalidation(distribution_id, invalidation_batch["CallerReference"])
+    def create_invalidation(self, distribution_id, invalidation_batch, validate_invalidation_change=True):
+        current_invalidation_response = None
+        if validate_invalidation_change:
+            current_invalidation_response = self.get_invalidation(distribution_id, invalidation_batch["CallerReference"])
         try:
             response = self.client.create_invalidation(
                 DistributionId=distribution_id, InvalidationBatch=invalidation_batch
@@ -184,7 +192,6 @@ class CloudFrontInvalidationServiceManager(object):
     def get_invalidation(self, distribution_id, caller_reference):
         # find all invalidations for the distribution
         invalidations = self.__cloudfront_facts_mgr.list_invalidations(distribution_id=distribution_id)
-
         # check if there is an invalidation with the same caller reference
         for invalidation in invalidations:
             invalidation_info = self.__cloudfront_facts_mgr.get_invalidation(
@@ -242,6 +249,7 @@ def main():
         distribution_id=dict(),
         alias=dict(),
         target_paths=dict(required=True, type="list", elements="str"),
+        validate_invalidation_change=dict(required=False, type="bool", default=True),
     )
 
     module = AnsibleAWSModule(
@@ -256,13 +264,14 @@ def main():
     distribution_id = module.params.get("distribution_id")
     alias = module.params.get("alias")
     target_paths = module.params.get("target_paths")
+    validate_invalidation_change = module.params.get("validate_invalidation_change")
 
     result = {}
 
     distribution_id = validation_mgr.validate_distribution_id(distribution_id, alias)
     valid_target_paths = validation_mgr.validate_invalidation_batch(target_paths, caller_reference)
     valid_pascal_target_paths = snake_dict_to_camel_dict(valid_target_paths, True)
-    result, changed = service_mgr.create_invalidation(distribution_id, valid_pascal_target_paths)
+    result, changed = service_mgr.create_invalidation(distribution_id, valid_pascal_target_paths, validate_invalidation_change)
 
     module.exit_json(changed=changed, **camel_dict_to_snake_dict(result))
 
